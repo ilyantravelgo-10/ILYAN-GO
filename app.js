@@ -996,17 +996,7 @@ let supabaseClient = null;
 function getSupabase() {
     if (supabaseClient) return supabaseClient;
 
-    // 1st priority: config.js (SUPABASE_CONFIG object) — shared by site and admin
-    if (window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.active &&
-        window.SUPABASE_CONFIG.url && window.SUPABASE_CONFIG.key) {
-        supabaseClient = window.supabase.createClient(
-            window.SUPABASE_CONFIG.url,
-            window.SUPABASE_CONFIG.key
-        );
-        return supabaseClient;
-    }
-
-    // 2nd priority: settings saved from the admin panel in localStorage
+    // 1st priority: settings saved from the admin panel in localStorage (configured via Admin UI)
     const db = getDB();
     if (db.settings && db.settings.supabase && db.settings.supabase.active) {
         const url = db.settings.supabase.url;
@@ -1015,6 +1005,16 @@ function getSupabase() {
             supabaseClient = window.supabase.createClient(url, key);
             return supabaseClient;
         }
+    }
+
+    // 2nd priority: config.js (SUPABASE_CONFIG object) — shared fallback
+    if (window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.active &&
+        window.SUPABASE_CONFIG.url && window.SUPABASE_CONFIG.key) {
+        supabaseClient = window.supabase.createClient(
+            window.SUPABASE_CONFIG.url,
+            window.SUPABASE_CONFIG.key
+        );
+        return supabaseClient;
     }
     return null;
 }
@@ -1027,35 +1027,49 @@ async function loadInitialData() {
             // Fetch categories, countries, offers, settings and promo_codes in parallel
             const [catRes, countRes, offRes, settingsRes, promoRes] = await Promise.all([
                 sb.from('categories').select('*'),
-                sb.from('countries').select('*'),
+                sb.from('countries').select('*').order('order', { ascending: true }),
                 sb.from('offers').select('*'),
                 sb.from('settings').select('*').eq('id', 'global_settings').single(),
                 sb.from('promo_codes').select('*')
             ]);
 
+            // If tables are missing (PGRST205), fall back silently to local
+            const isMissingTable = (r) => r.error && (r.error.code === 'PGRST205' || (r.error.message && r.error.message.includes('schema cache')));
+
+            if (isMissingTable(catRes) || isMissingTable(countRes) || isMissingTable(offRes)) {
+                console.warn('[ILYAN GO] Supabase tables not found, falling back to local data. Please run the SQL schema script.');
+                loadLocalData();
+                return;
+            }
+
             if (catRes.error) throw catRes.error;
             if (countRes.error) throw countRes.error;
             if (offRes.error) throw offRes.error;
 
-            activeCategories = catRes.data || [];
-            activeCountries = (countRes.data || []).sort((a,b) => (a.order || 0) - (b.order || 0));
-            activeOffers = offRes.data || [];
+            // Load from Supabase - use local defaults as fallback for empty tables
+            const db = getDB();
+            activeCategories = (catRes.data && catRes.data.length > 0) ? catRes.data : (db.categories || DEFAULT_CATEGORIES);
+            activeCountries  = (countRes.data && countRes.data.length > 0)
+                ? countRes.data.sort((a,b) => (a.order || 0) - (b.order || 0))
+                : (db.countries || DEFAULT_COUNTRIES).sort((a,b) => (a.order || 0) - (b.order || 0));
+            activeOffers = (offRes.data && offRes.data.length > 0) ? offRes.data : (db.offers || DEFAULT_OFFERS);
 
             // Sync promo codes to localStorage for local reference
             if (!promoRes.error && promoRes.data) {
-                const db = getDB();
                 db.promoCodes = promoRes.data;
                 saveDB(db);
             }
 
-            // If Supabase settings fetched successfully, overwrite local settings
+            // If Supabase settings fetched successfully, merge with local settings
             if (settingsRes.data && settingsRes.data.data) {
-                const db = getDB();
+                // Preserve supabase connection config from local so it isn't overwritten
+                const localSbConfig = db.settings ? db.settings.supabase : null;
                 db.settings = { ...db.settings, ...settingsRes.data.data };
+                if (localSbConfig) db.settings.supabase = localSbConfig;
                 saveDB(db);
             }
         } catch (err) {
-            console.error("Supabase load failed, falling back to LocalStorage:", err);
+            console.error('[ILYAN GO] Supabase load failed, falling back to LocalStorage:', err);
             loadLocalData();
         }
     } else {

@@ -861,6 +861,9 @@
 
             <!-- 1. STATS / OVERVIEW PANEL -->
             <div id="stats-panel" class="tab-panel active">
+                <!-- Connection Status Alert Banner -->
+                <div id="dashboardConnectionAlert" style="margin-bottom: 20px;"></div>
+
                 <div class="page-header">
                     <div class="page-title">
                         <h2>Vue d'ensemble</h2>
@@ -1348,18 +1351,20 @@
                         <div style="display:flex;align-items:flex-start;gap:14px;">
                             <i class='bx bx-link-external' style="font-size:1.8rem;color:#2563eb;flex-shrink:0;margin-top:2px;"></i>
                             <div style="flex:1;">
-                                <h4 style="font-weight:800;color:#1e40af;margin:0 0 8px;font-size:0.95rem;">&#x1F517; لربط لوحة التحكم بالموقع المنشور — How to connect Admin to Published Site</h4>
+                                <h4 style="font-weight:800;color:#1e40af;margin:0 0 8px;font-size:0.95rem;">🔗 لربط لوحة التحكم بالموقع المنشور — How to connect Admin to Published Site</h4>
                                 <p style="font-size:0.82rem;color:#1d4ed8;margin:0 0 12px;line-height:1.6;">
-                                    1. أنشئ مشروع Supabase مجاني على <strong>supabase.com</strong><br>
-                                    2. انسخ رابط المشروع ومفتاح API وأدخلهما أدناه وفعّل المزامنة<br>
-                                    3. افتح ملف <strong>config.js</strong> في مجلد المشروع وضع نفس البيانات فيه واضبط <strong>active: true</strong><br>
-                                    4. ارفع جميع الملفات للاستضافة مرة واحدة فقط — بعدها ستظهر كل التعديلات تلقائياً
+                                    <strong>① أنشئ مشروع Supabase مجاني على <a href="https://supabase.com" target="_blank" style="color:#1e40af;">supabase.com</a></strong><br>
+                                    <strong>② أدخل رابط المشروع ومفتاح API أدناه ← ثم انقر "Enregistrer"</strong><br>
+                                    <strong>③ انسخ سكربت SQL أدناه وشغّله في SQL Editor على Supabase <em style="color:#dc2626">(مرة واحدة فقط)</em></strong><br>
+                                    <strong>④ انقر زر "تصدير البيانات إلى Supabase" لرفع بياناتك الحالية</strong><br>
+                                    <strong>⑤ حمّل ملف config.js ← ارفعه على الاستضافة في مجلد الموقع</strong><br>
+                                    ✅ بعد ذلك أي تعديل من لوحة التحكم يظهر فوراً على الموقع!
                                 </p>
                                 <div style="background:rgba(30,64,175,0.1);border-radius:8px;padding:12px 14px;font-family:monospace;font-size:0.78rem;color:#1e3a8a;border:1px solid #93c5fd;">
                                     <strong>config.js</strong><br>
                                     window.SUPABASE_CONFIG = {<br>
                                     &nbsp;&nbsp;url: "https://XXXX.supabase.co",<br>
-                                    &nbsp;&nbsp;key: "eyJhbGci...",<br>
+                                    &nbsp;&nbsp;key: "sb_publishable_...",<br>
                                     &nbsp;&nbsp;active: <strong>true</strong><br>
                                     };
                                 </div>
@@ -1395,7 +1400,12 @@
                             <textarea readonly class="form-control" rows="6" style="font-family:monospace; font-size:0.8rem; background-color:#eaeef2;" id="supabaseSqlCode"></textarea>
                             <button type="button" class="btn btn-outline btn-sm mt-2" onclick="copySqlScript()"><i class='bx bx-copy'></i> Copier le Script SQL</button>
                         </div>
-                        <button type="button" class="btn btn-primary" onclick="saveSupabaseSettings()">Enregistrer les paramètres Supabase</button>
+                        <div style="display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap;">
+                            <button type="button" class="btn btn-primary" style="flex: 2; min-width: 200px;" onclick="saveSupabaseSettings()">Enregistrer les paramètres Supabase</button>
+                            <button type="button" class="btn btn-danger" style="flex: 1; min-width: 150px; display: flex; align-items: center; justify-content: center; gap: 6px;" id="exportDataBtn" onclick="exportLocalDataToSupabase()">
+                                <i class='bx bx-cloud-upload' style="font-size:1.2rem;"></i> تصدير البيانات إلى Supabase
+                            </button>
+                        </div>
                         <div style="display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap;">
                             <button type="button" class="btn btn-outline" style="flex: 1; min-width: 200px; padding: 10px;" onclick="downloadConfigJS()">
                                 <i class='bx bx-download' style="font-size: 1.1rem; vertical-align: middle; margin-right: 5px;"></i> تحميل ملف config.js (Télécharger)
@@ -2048,7 +2058,11 @@ create table if not exists public.countries (
   "processingTime" text not null,
   requirements text[] not null,
   conditions text not null,
-  "order" integer not null default 1
+  "order" integer not null default 1,
+  "servicePrice" bigint not null default 10000,
+  "requiresBiometrics" boolean not null default false,
+  "acceptanceRate" integer not null default 99,
+  "objectPosition" text not null default '50% 50%'
 );
 
 create table if not exists public.offers (
@@ -2073,7 +2087,8 @@ create table if not exists public.orders (
   status text not null,
   date text not null,
   "uploadedFiles" jsonb not null default '[]'::jsonb,
-  logs jsonb not null default '[]'::jsonb
+  logs jsonb not null default '[]'::jsonb,
+  "paymentMethod" text
 );
 
 create table if not exists public.customers (
@@ -2148,8 +2163,75 @@ alter table public.promo_codes disable row level security;`;
     <!-- FRONTEND JAVASCRIPT SYSTEM ENGINE -->
     <script>
         // Database connection helper
+        const DEFAULT_SETTINGS = {
+            siteName: "ILYAN GO",
+            phone: "+213 559614849",
+            email: "ilyantravel10@gmail.com",
+            address: "promotion ouadah, Bouira 10000",
+            social: {
+                facebook: "https://www.facebook.com/share/1J3HkqqB3u/",
+                instagram: "https://www.instagram.com/ilyan_travel_agency",
+                twitter: "#",
+                linkedin: "#"
+            },
+            colors: {
+                primary: "#0284c7",
+                secondary: "#ea580c"
+            },
+            sections: {
+                hero: true,
+                features: true,
+                howItWorks: true,
+                offers: true,
+                destinations: true,
+                demande: true,
+                contact: true
+            },
+            hero: {
+                title: "Simplifiez votre demande de visa avec ILYAN GO",
+                subtitle: "La plateforme facile et rapide pour obtenir vos informations et déposer votre demande de visa en ligne.",
+                bgType: "video",
+                videoUrl: "https://assets.mixkit.co/videos/preview/mixkit-travel-destination-of-a-beautiful-historical-town-40084-large.mp4",
+                bgImage: "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=1200&q=80"
+            }
+        };
+
+        const DEFAULT_STAFF = [
+            { name: "Yacine Owner", username: "yacinemrf18@gmail.com", email: "yacinemrf18@gmail.com", password: "yacinelk", role: "super_admin" }
+        ];
+
         function getDB() {
-            const db = JSON.parse(localStorage.getItem('visago_db')) || {};
+            let dbStr = localStorage.getItem('visago_db');
+            if (!dbStr) {
+                const initialDB = {
+                    settings: DEFAULT_SETTINGS,
+                    categories: [],
+                    countries: [],
+                    offers: [],
+                    orders: [],
+                    customers: [],
+                    messages: [],
+                    staff: DEFAULT_STAFF,
+                    auditLogs: [],
+                    notifications: [],
+                    faqs: [],
+                    blog: [],
+                    promoCodes: [],
+                    liveChats: []
+                };
+                localStorage.setItem('visago_db', JSON.stringify(initialDB));
+                return initialDB;
+            }
+            const db = JSON.parse(dbStr);
+            
+            // Auto-heal missing keys
+            let updated = false;
+            if (!db.settings) { db.settings = DEFAULT_SETTINGS; updated = true; }
+            if (!db.staff) { db.staff = DEFAULT_STAFF; updated = true; }
+            if (updated) {
+                localStorage.setItem('visago_db', JSON.stringify(db));
+            }
+
             // Migration: If siteName is still Visago, update it to ILYAN GO
             if (db.settings && db.settings.siteName === "Visago") {
                 db.settings.siteName = "ILYAN GO";
@@ -2184,17 +2266,7 @@ alter table public.promo_codes disable row level security;`;
         function getSupabase() {
             if (supabaseClient) return supabaseClient;
 
-            // 1st priority: config.js (SUPABASE_CONFIG) — shared by site and admin
-            if (window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.active &&
-                window.SUPABASE_CONFIG.url && window.SUPABASE_CONFIG.key) {
-                supabaseClient = window.supabase.createClient(
-                    window.SUPABASE_CONFIG.url,
-                    window.SUPABASE_CONFIG.key
-                );
-                return supabaseClient;
-            }
-
-            // 2nd priority: settings saved from the admin panel in localStorage
+            // 1st priority: settings saved from the admin panel in localStorage (configured via Admin UI)
             const db = getDB();
             if (db.settings && db.settings.supabase && db.settings.supabase.active) {
                 const url = db.settings.supabase.url;
@@ -2204,6 +2276,16 @@ alter table public.promo_codes disable row level security;`;
                     return supabaseClient;
                 }
             }
+
+            // 2nd priority: config.js (SUPABASE_CONFIG) — shared fallback
+            if (window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.active &&
+                window.SUPABASE_CONFIG.url && window.SUPABASE_CONFIG.key) {
+                supabaseClient = window.supabase.createClient(
+                    window.SUPABASE_CONFIG.url,
+                    window.SUPABASE_CONFIG.key
+                );
+                return supabaseClient;
+            }
             return null;
         }
 
@@ -2212,6 +2294,13 @@ alter table public.promo_codes disable row level security;`;
             if (sb) {
                 try {
                     const { data, error } = await sb.from('settings').select('*').eq('id', 'global_settings').single();
+                    
+                    // Silently skip if tables don't exist yet (PGRST205)
+                    if (error && (error.code === 'PGRST205' || (error.message && error.message.includes('schema cache')))) {
+                        console.warn('[Admin] Supabase tables not created yet. Running in local mode.');
+                        return;
+                    }
+                    
                     if (!error && data && data.data) {
                         const db = getDB();
                         const localSupabase = db.settings ? db.settings.supabase : null;
@@ -2260,8 +2349,22 @@ alter table public.promo_codes disable row level security;`;
                 const mapped = getMappedTableName(table);
                 const { data, error } = await sb.from(mapped).select('*');
                 if (error) {
+                    // Silently fallback to local if tables don't exist yet
+                    if (error.code === 'PGRST205' || (error.message && error.message.includes('schema cache'))) {
+                        return getLocalTable(table);
+                    }
                     console.error("Error fetching table " + table, error);
                     return getLocalTable(table);
+                }
+                // If Supabase returned data, also update local cache
+                if (data) {
+                    const db = getDB();
+                    if (table === 'auditLogs') {
+                        db.auditLogs = data;
+                    } else if (db[table] !== undefined) {
+                        db[table] = data;
+                    }
+                    saveDB(db);
                 }
                 return data;
             }
@@ -2278,45 +2381,60 @@ alter table public.promo_codes disable row level security;`;
         }
 
         async function dbInsert(table, record) {
+            // Always save locally first to guarantee data isn't lost
+            const db = getDB();
+            if (!db[table]) db[table] = [];
+            db[table].push(record);
+            saveDB(db);
+
+            // Then sync to Supabase if connected
             const sb = getSupabase();
             if (sb) {
                 const mapped = getMappedTableName(table);
                 const { error } = await sb.from(mapped).insert([record]);
-                if (error) console.error("Error inserting in " + table, error);
-            } else {
-                const db = getDB();
-                if (!db[table]) db[table] = [];
-                db[table].push(record);
-                saveDB(db);
+                if (error) {
+                    console.error('Supabase insert error (' + table + '):', error);
+                    showToast('⚠️ Sauvegardé localement. Erreur Supabase: ' + (error.message || error.code), 'warning');
+                }
             }
         }
 
         async function dbUpdate(table, id, record) {
+            // Always save locally first
+            const db = getDB();
+            const index = (db[table] || []).findIndex(item => item.id === id);
+            if (index !== -1) {
+                db[table][index] = { ...db[table][index], ...record };
+                saveDB(db);
+            }
+
+            // Then sync to Supabase if connected
             const sb = getSupabase();
             if (sb) {
                 const mapped = getMappedTableName(table);
                 const { error } = await sb.from(mapped).update(record).eq('id', id);
-                if (error) console.error("Error updating " + table, error);
-            } else {
-                const db = getDB();
-                const index = db[table].findIndex(item => item.id === id);
-                if (index !== -1) {
-                    db[table][index] = { ...db[table][index], ...record };
-                    saveDB(db);
+                if (error) {
+                    console.error('Supabase update error (' + table + '):', error);
+                    showToast('⚠️ Sauvegardé localement. Erreur Supabase: ' + (error.message || error.code), 'warning');
                 }
             }
         }
 
         async function dbDelete(table, id) {
+            // Always delete locally first
+            const db = getDB();
+            db[table] = (db[table] || []).filter(item => item.id !== id);
+            saveDB(db);
+
+            // Then sync to Supabase if connected
             const sb = getSupabase();
             if (sb) {
                 const mapped = getMappedTableName(table);
                 const { error } = await sb.from(mapped).delete().eq('id', id);
-                if (error) console.error("Error deleting from " + table, error);
-            } else {
-                const db = getDB();
-                db[table] = db[table].filter(item => item.id !== id);
-                saveDB(db);
+                if (error) {
+                    console.error('Supabase delete error (' + table + '):', error);
+                    showToast('⚠️ Supprimé localement. Erreur Supabase: ' + (error.message || error.code), 'warning');
+                }
             }
         }
 
@@ -3711,12 +3829,24 @@ alter table public.promo_codes disable row level security;`;
                 t.style.cssText = 'position:fixed; bottom:28px; right:28px; padding:14px 22px; border-radius:12px; font-weight:700; font-size:0.9rem; z-index:99999; box-shadow:0 8px 30px rgba(0,0,0,0.18); transition:all 0.3s; display:flex; align-items:center; gap:10px; font-family:inherit;';
                 document.body.appendChild(t);
             }
-            t.style.background = type === 'success' ? '#10b981' : '#ef4444';
+            const colors = {
+                success: '#10b981',
+                error:   '#ef4444',
+                warning: '#f59e0b',
+                info:    '#3b82f6'
+            };
+            const icons = {
+                success: 'bx-check-circle',
+                error:   'bx-x-circle',
+                warning: 'bx-error',
+                info:    'bx-info-circle'
+            };
+            t.style.background = colors[type] || colors.success;
             t.style.color = 'white';
-            t.innerHTML = `<i class='bx bx-check-circle' style='font-size:1.2rem;'></i> ${msg}`;
+            t.innerHTML = `<i class='bx ${icons[type] || icons.success}' style='font-size:1.2rem;'></i> ${msg}`;
             t.style.opacity = '1';
             t.style.transform = 'translateY(0)';
-            setTimeout(() => { t.style.opacity='0'; t.style.transform='translateY(20px)'; }, 3500);
+            setTimeout(() => { t.style.opacity='0'; t.style.transform='translateY(20px)'; }, 4000);
         }
 
         // ========================================
@@ -4435,8 +4565,7 @@ alter table public.promo_codes disable row level security;`;
             updateStorageUsageDisplay();
 
             // Update connection status live badge
-            const isConnected = !!(getSupabase());
-            updateConnectionStatusBadge(isConnected);
+            testSupabaseConnection();
         }
 
         document.getElementById('globalContactForm').addEventListener('submit', async function(e) {
@@ -4514,18 +4643,24 @@ alter table public.promo_codes disable row level security;`;
             supabaseClient = null;
 
             if (active && url && key) {
+                showToast('Connexion à Supabase en cours...', 'info');
+                await testSupabaseConnection();
+                const sb = getSupabase();
                 try {
-                    const client = getSupabase();
-                    if (client) {
-                        showToast('Supabase connecte ! Les modifications s\'affichent sur le site publie.', 'success');
+                    const { error } = await sb.from('settings').select('id').limit(1);
+                    if (error && (error.code === 'PGRST205' || (error.message && error.message.includes('public.settings')))) {
+                        showToast('Supabase connecté, mais les tables n\'existent pas encore.', 'warning');
+                    } else if (error) {
+                        showToast('Erreur de connexion Supabase: ' + error.message, 'error');
+                    } else {
+                        showToast('Supabase connecté avec succès !', 'success');
                         await logAction('Parametres Supabase mis a jour et actives.');
-                        updateConnectionStatusBadge(true);
                     }
-                } catch (err) {
-                    showToast('Erreur Supabase: ' + err.message, 'error');
+                } catch(e) {
+                    showToast('Erreur Supabase: ' + e.message, 'error');
                 }
             } else {
-                updateConnectionStatusBadge(false);
+                updateConnectionStatusBadge('local');
                 showToast('Mode local uniquement. Les modifications n\'affecteront pas le site publie.', 'error');
             }
         }
@@ -4593,29 +4728,163 @@ window.SUPABASE_CONFIG = {
             });
         }
 
-        function updateConnectionStatusBadge(isConnected) {
+        function updateConnectionStatusBadge(status, errorMsg = '') {
             const badge = document.getElementById('connectionStatusBadge');
             if (!badge) return;
-            if (isConnected) {
+
+            if (status === 'connected') {
                 badge.innerHTML = `
                     <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:linear-gradient(135deg,#d1fae5,#a7f3d0);border:1.5px solid #10b981;border-radius:12px;">
                         <div style="width:12px;height:12px;background:#10b981;border-radius:50%;box-shadow:0 0 0 3px rgba(16,185,129,0.25);flex-shrink:0;"></div>
                         <div>
-                            <div style="font-weight:800;color:#065f46;font-size:0.9rem;">&#x2705; متصل بقاعدة البيانات &mdash; Connected to Supabase</div>
+                            <div style="font-weight:800;color:#065f46;font-size:0.9rem;">✅ متصل بقاعدة البيانات &mdash; Connected to Supabase</div>
                             <div style="font-size:0.78rem;color:#047857;margin-top:2px;">أي تعديل سيظهر فورًا على الموقع المنشور &mdash; All changes will appear live on the published site</div>
                         </div>
                     </div>`;
-            } else {
+            } else if (status === 'missing_tables') {
+                badge.innerHTML = `
+                    <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:linear-gradient(135deg,#fffbeb,#fde68a);border:1.5px solid #f59e0b;border-radius:12px;">
+                        <div style="width:12px;height:12px;background:#f59e0b;border-radius:50%;box-shadow:0 0 0 3px rgba(245,158,11,0.25);flex-shrink:0;"></div>
+                        <div>
+                            <div style="font-weight:800;color:#78350f;font-size:0.9rem;">⚠️ الجداول غير موجودة &mdash; Tables Missing in Supabase</div>
+                            <div style="font-size:0.78rem;color:#b45309;margin-top:2px;line-height:1.3;">
+                                تم الاتصال ولكن الجداول غير موجودة في قاعدة البيانات. <strong>يرجى نسخ سكربت SQL أدناه وتشغيله في SQL Editor على Supabase لتفعيل المزامنة!</strong>
+                                <br>Connected but tables do not exist. Please execute the SQL schema script below in your Supabase SQL Editor.
+                            </div>
+                        </div>
+                    </div>`;
+            } else if (status === 'error') {
                 badge.innerHTML = `
                     <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:linear-gradient(135deg,#fef2f2,#fecaca);border:1.5px solid #ef4444;border-radius:12px;">
                         <div style="width:12px;height:12px;background:#ef4444;border-radius:50%;box-shadow:0 0 0 3px rgba(239,68,68,0.25);flex-shrink:0;"></div>
                         <div>
-                            <div style="font-weight:800;color:#991b1b;font-size:0.9rem;">&#x274C; وضع محلي &mdash; Local Mode Only</div>
-                            <div style="font-size:0.78rem;color:#b91c1c;margin-top:2px;">التعديلات لن تظهر على الموقع المنشور. فعّل Supabase أدناه &mdash; Changes will NOT appear on the published site.</div>
+                            <div style="font-weight:800;color:#991b1b;font-size:0.9rem;">❌ خطأ في الاتصال &mdash; Supabase Connection Error</div>
+                            <div style="font-size:0.78rem;color:#b91c1c;margin-top:2px;word-break:break-all;">${errorMsg}</div>
+                        </div>
+                    </div>`;
+            } else {
+                badge.innerHTML = `
+                    <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:linear-gradient(135deg,#f8fafc,#e2e8f0);border:1.5px solid #94a3b8;border-radius:12px;">
+                        <div style="width:12px;height:12px;background:#94a3b8;border-radius:50%;box-shadow:0 0 0 3px rgba(148,163,184,0.25);flex-shrink:0;"></div>
+                        <div>
+                            <div style="font-weight:800;color:#334155;font-size:0.9rem;">⚪ وضع محلي فقط &mdash; Local Mode Only</div>
+                            <div style="font-size:0.78rem;color:#475569;margin-top:2px;">المزامنة غير مفعلة. التعديلات ستحفظ في متصفحك الحالي فقط ولن تظهر للزوار &mdash; Sync disabled. Changes won't show on the live site.</div>
                         </div>
                     </div>`;
             }
         }
+
+        async function testSupabaseConnection() {
+            const badge = document.getElementById('connectionStatusBadge');
+            if (!badge) return;
+
+            const sb = getSupabase();
+            if (!sb) {
+                updateConnectionStatusBadge('local');
+                return;
+            }
+
+            badge.innerHTML = `
+                <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:#f1f5f9;border:1.5px solid #cbd5e1;border-radius:12px;">
+                    <div style="width:12px;height:12px;background:#94a3b8;border-radius:50%;flex-shrink:0;"></div>
+                    <div>
+                        <div style="font-weight:800;color:#475569;font-size:0.9rem;">⏳ جاري التحقق من الاتصال... / Vérification de la connexion...</div>
+                    </div>
+                </div>`;
+
+            try {
+                const { data, error } = await sb.from('settings').select('id').limit(1);
+                
+                if (error) {
+                    if (error.code === 'PGRST205' || (error.message && error.message.includes('public.settings'))) {
+                        updateConnectionStatusBadge('missing_tables', error.message);
+                    } else {
+                        updateConnectionStatusBadge('error', error.message || JSON.stringify(error));
+                    }
+                } else {
+                    updateConnectionStatusBadge('connected');
+                }
+            } catch (err) {
+                updateConnectionStatusBadge('error', err.message || err);
+            }
+        }
+
+        async function exportLocalDataToSupabase() {
+            const sb = getSupabase();
+            if (!sb) {
+                alert("يرجى إعداد وتفعيل اتصال Supabase أولاً! / Veuillez d'abord configurer et activer la connexion Supabase.");
+                return;
+            }
+
+            if (!confirm("⚠️ هل أنت متأكد من رغبتك في تصدير كافة البيانات المحلية (الدول، العروض، التصنيفات، الإعدادات، الرموز الترويجية) من متصفحك الحالي إلى قاعدة بيانات Supabase؟\n\nسيؤدي هذا إلى الكتابة فوق أي بيانات موجودة هناك بنفس المعرّف (ID).")) {
+                return;
+            }
+
+            const exportBtn = document.getElementById('exportDataBtn');
+            const originalHTML = exportBtn ? exportBtn.innerHTML : '';
+            if (exportBtn) {
+                exportBtn.disabled = true;
+                exportBtn.innerHTML = "<i class='bx bx-loader-alt bx-spin'></i> جاري الرفع...";
+            }
+            showToast('جاري رفع البيانات المحلية إلى قاعدة البيانات...', 'info');
+
+            try {
+                const db = getDB();
+                
+                // 1. Export settings
+                if (db.settings) {
+                    const { error } = await sb.from('settings').upsert([{ id: 'global_settings', data: db.settings }]);
+                    if (error) throw new Error("Error exporting settings: " + error.message);
+                }
+
+                // 2. Export categories
+                if (db.categories && db.categories.length > 0) {
+                    const { error } = await sb.from('categories').upsert(db.categories);
+                    if (error) throw new Error("Error exporting categories: " + error.message);
+                }
+
+                // 3. Export countries
+                if (db.countries && db.countries.length > 0) {
+                    const countriesToExport = db.countries.map(c => ({
+                        ...c,
+                        requirements: Array.isArray(c.requirements) ? c.requirements : []
+                    }));
+                    const { error } = await sb.from('countries').upsert(countriesToExport);
+                    if (error) throw new Error("Error exporting countries: " + error.message);
+                }
+
+                // 4. Export offers
+                if (db.offers && db.offers.length > 0) {
+                    const { error } = await sb.from('offers').upsert(db.offers);
+                    if (error) throw new Error("Error exporting offers: " + error.message);
+                }
+
+                // 5. Export promo codes
+                if (db.promoCodes && db.promoCodes.length > 0) {
+                    const { error } = await sb.from('promo_codes').upsert(db.promoCodes);
+                    if (error) throw new Error("Error exporting promo codes: " + error.message);
+                }
+
+                showToast('تم تصدير البيانات بنجاح إلى Supabase! / Données exportées avec succès !', 'success');
+                await logAction("Exportation globale des données locales vers Supabase");
+            } catch (err) {
+                console.error(err);
+                let customMsg = err.message || JSON.stringify(err);
+                if (customMsg.includes('relation') || customMsg.includes('does not exist') || customMsg.includes('42P01') || customMsg.includes('PGRST205') || customMsg.includes('schema cache')) {
+                    customMsg = "⚠️ الجداول غير موجودة في قاعدة بيانات Supabase الخاصة بك.\n\nيرجى اتباع الخطوات التالية لحل المشكلة:\n1. انسخ سكربت SQL من الأسفل بالضغط على 'Copier le Script SQL'.\n2. افتح لوحة تحكم Supabase واذهب إلى قسم 'SQL Editor'.\n3. افتح استعلام جديد (New Query) والصق السكربت هناك ثم اضغط 'Run'.\n4. بعد ذلك، اضغط على زر التصدير هذا مرة أخرى لرفع كافة بياناتك بنجاح.";
+                } else {
+                    customMsg = "حدث خطأ أثناء تصدير البيانات:\n" + customMsg;
+                }
+                alert("❌ " + customMsg);
+                showToast('فشل التصدير: ' + (err.message || 'Erreur tables manquantes'), 'error');
+            } finally {
+                if (exportBtn) {
+                    exportBtn.disabled = false;
+                    exportBtn.innerHTML = originalHTML;
+                }
+            }
+        }
+
 
         function copySqlScript() {
             const copyText = document.getElementById("supabaseSqlCode");
@@ -5093,9 +5362,178 @@ window.SUPABASE_CONFIG = {
             document.getElementById('sidebar').classList.toggle('show');
         });
 
+        async function updateDashboardConnectionAlert() {
+            const container = document.getElementById('dashboardConnectionAlert');
+            if (!container) return;
+
+            const sb = getSupabase();
+            const db = getDB();
+
+            if (!sb) {
+                container.style.display = 'block';
+                container.innerHTML = `
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 20px; background:linear-gradient(135deg,#fef2f2,#fee2e2); border:1.5px solid #fca5a5; border-radius:12px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); flex-wrap:wrap; direction: rtl; text-align: right;">
+                        <div style="display:flex; align-items:center; gap:12px;">
+                            <i class='bx bx-error-circle' style="font-size:2rem; color:#dc2626;"></i>
+                            <div>
+                                <h4 style="margin:0; font-weight:800; color:#991b1b; font-size:0.95rem;">⚠️ وضع التحكم المحلي فقط (غير متصل بقاعدة البيانات)</h4>
+                                <p style="margin:4px 0 0; font-size:0.82rem; color:#b91c1c; line-height:1.4;">
+                                    التعديلات التي تقوم بها تُحفظ في متصفحك الحالي فقط ولن تظهر للزوار على الموقع المنشور. يرجى تفعيل اتصال قاعدة البيانات وتصدير البيانات.
+                                </p>
+                            </div>
+                        </div>
+                        <div style="display:flex; gap:10px; margin-right: auto; direction: ltr;">
+                            <button onclick="switchTab('settings-panel')" class="btn btn-primary" style="font-size:0.8rem; padding:8px 16px; background:#dc2626; border-color:#dc2626;">
+                                <i class='bx bx-cog'></i> إعدادات الاتصال
+                            </button>
+                            <button onclick="triggerQuickExport()" class="btn btn-secondary" style="font-size:0.8rem; padding:8px 16px; background:#1e293b; border-color:#1e293b; color:white;">
+                                <i class='bx bx-cloud-upload'></i> تصدير البيانات الآن
+                            </button>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            container.style.display = 'block';
+            container.innerHTML = `
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 18px; background:#f1f5f9; border:1.5px solid #cbd5e1; border-radius:12px; direction: rtl; text-align: right;">
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <i class='bx bx-loader-alt bx-spin' style="font-size:1.2rem; color:#64748b;"></i>
+                        <span style="font-size:0.85rem; color:#475569;">جاري التحقق من حالة الاتصال بقاعدة البيانات...</span>
+                    </div>
+                </div>
+            `;
+
+            try {
+                const { data, error } = await sb.from('settings').select('id').limit(1);
+                
+                if (error) {
+                    if (error.code === 'PGRST205' || (error.message && (error.message.includes('public.settings') || error.message.includes('schema cache')))) {
+                        // Missing tables
+                        container.innerHTML = `
+                            <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 20px; background:linear-gradient(135deg,#fffbeb,#fef3c7); border:1.5px solid #fcd34d; border-radius:12px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); flex-wrap:wrap; direction: rtl; text-align: right;">
+                                <div style="display:flex; align-items:center; gap:12px;">
+                                    <i class='bx bx-data' style="font-size:2rem; color:#d97706;"></i>
+                                    <div>
+                                        <h4 style="margin:0; font-weight:800; color:#78350f; font-size:0.95rem;">⚠️ الجداول غير موجودة في قاعدة البيانات</h4>
+                                        <p style="margin:4px 0 0; font-size:0.82rem; color:#b45309; line-height:1.4;">
+                                            تم الاتصال بـ Supabase بنجاح، ولكن جداول البيانات غير موجودة. يرجى تهيئة قاعدة البيانات بالضغط على الزر أدناه لتصدير البيانات وإنشاء الجداول.
+                                        </p>
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:10px; margin-right: auto; direction: ltr;">
+                                    <button onclick="switchTab('settings-panel')" class="btn btn-primary" style="font-size:0.8rem; padding:8px 16px; background:#d97706; border-color:#d97706;">
+                                        <i class='bx bx-terminal'></i> عرض سكربت SQL
+                                    </button>
+                                    <button onclick="triggerQuickExport()" class="btn btn-secondary" style="font-size:0.8rem; padding:8px 16px; background:#1e293b; border-color:#1e293b; color:white;">
+                                        <i class='bx bx-cloud-upload'></i> إنشاء الجداول وتصدير البيانات
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        // General Connection Error
+                        container.innerHTML = `
+                            <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 20px; background:linear-gradient(135deg,#fef2f2,#fee2e2); border:1.5px solid #fca5a5; border-radius:12px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); flex-wrap:wrap; direction: rtl; text-align: right;">
+                                <div style="display:flex; align-items:center; gap:12px;">
+                                    <i class='bx bx-wifi-off' style="font-size:2rem; color:#dc2626;"></i>
+                                    <div>
+                                        <h4 style="margin:0; font-weight:800; color:#991b1b; font-size:0.95rem;">❌ خطأ في الاتصال بقاعدة البيانات</h4>
+                                        <p style="margin:4px 0 0; font-size:0.82rem; color:#b91c1c; line-height:1.4; word-break:break-all;">
+                                            فشل الاتصال بـ Supabase: ${error.message || JSON.stringify(error)}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:10px; margin-right: auto; direction: ltr;">
+                                    <button onclick="switchTab('settings-panel')" class="btn btn-primary" style="font-size:0.8rem; padding:8px 16px; background:#dc2626; border-color:#dc2626;">
+                                        <i class='bx bx-cog'></i> إصلاح الإعدادات
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }
+                } else {
+                    // Success, Connected!
+                    const localUrl = db.settings && db.settings.supabase ? db.settings.supabase.url : '';
+                    const sharedUrl = window.SUPABASE_CONFIG ? window.SUPABASE_CONFIG.url : '';
+                    const isOutOfSync = localUrl && sharedUrl && (localUrl !== sharedUrl);
+
+                    if (isOutOfSync) {
+                        container.innerHTML = `
+                            <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 20px; background:linear-gradient(135deg,#fffbeb,#fef3c7); border:1.5px solid #fcd34d; border-radius:12px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); flex-wrap:wrap; direction: rtl; text-align: right;">
+                                <div style="display:flex; align-items:center; gap:12px;">
+                                    <i class='bx bx-refresh' style="font-size:2rem; color:#d97706;"></i>
+                                    <div>
+                                        <h4 style="margin:0; font-weight:800; color:#78350f; font-size:0.95rem;">⚠️ ملف الإعدادات config.js غير متطابق مع قاعدة البيانات النشطة</h4>
+                                        <p style="margin:4px 0 0; font-size:0.82rem; color:#b45309; line-height:1.4;">
+                                            لوحة التحكم متصلة بقاعدة البيانات الخاصة بك، ولكن ملف <code>config.js</code> على الخادم قد يكون قديماً. يرجى تحميله ورفعه للموقع المنشور ليراها الزوار.
+                                        </p>
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:10px; margin-right: auto; direction: ltr;">
+                                    <button onclick="downloadConfigJS()" class="btn btn-outline" style="font-size:0.8rem; padding:8px 16px; border-color:#d97706; color:#d97706;">
+                                        <i class='bx bx-download'></i> تحميل config.js
+                                    </button>
+                                    <button onclick="triggerQuickExport()" class="btn btn-secondary" style="font-size:0.8rem; padding:8px 16px; background:#d97706; border-color:#d97706; color:white;">
+                                        <i class='bx bx-cloud-upload'></i> تصدير البيانات الآن
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        container.innerHTML = `
+                            <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 18px; background:linear-gradient(135deg,#d1fae5,#ecfdf5); border:1.5px solid #6ee7b7; border-radius:12px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); flex-wrap:wrap; direction: rtl; text-align: right;">
+                                <div style="display:flex; align-items:center; gap:12px;">
+                                    <div style="width:10px; height:10px; background:#10b981; border-radius:50%; box-shadow:0 0 0 3px rgba(16,185,129,0.25); flex-shrink:0;"></div>
+                                    <div>
+                                        <span style="font-weight:700; color:#065f46; font-size:0.85rem;">✅ متصل بقاعدة البيانات بشكل صحيح وسينعكس أي تعديل فورًا على الموقع.</span>
+                                    </div>
+                                </div>
+                                <button onclick="triggerQuickExport()" class="btn-link" style="font-size:0.82rem; color:#047857; text-decoration:underline; font-weight:700; border:none; background:none; cursor:pointer; padding:0; margin-right: auto;">
+                                    <i class='bx bx-cloud-upload' style="vertical-align:middle; font-size:1.1rem;"></i> تصدير/مزامنة البيانات الآن بضغطة واحدة
+                                </button>
+                            </div>
+                        `;
+                    }
+                }
+            } catch (err) {
+                container.innerHTML = `
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 20px; background:linear-gradient(135deg,#fef2f2,#fee2e2); border:1.5px solid #fca5a5; border-radius:12px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.05); flex-wrap:wrap; direction: rtl; text-align: right;">
+                        <div style="display:flex; align-items:center; gap:12px;">
+                            <i class='bx bx-wifi-off' style="font-size:2rem; color:#dc2626;"></i>
+                            <div>
+                                <h4 style="margin:0; font-weight:800; color:#991b1b; font-size:0.95rem;">❌ خطأ غير متوقع في الاتصال بقاعدة البيانات</h4>
+                                <p style="margin:4px 0 0; font-size:0.82rem; color:#b91c1c; line-height:1.4; word-break:break-all;">
+                                    فشل: ${err.message || err}
+                                </p>
+                            </div>
+                        </div>
+                        <div style="display:flex; gap:10px; margin-right: auto; direction: ltr;">
+                            <button onclick="switchTab('settings-panel')" class="btn btn-primary" style="font-size:0.8rem; padding:8px 16px; background:#dc2626; border-color:#dc2626;">
+                                <i class='bx bx-cog'></i> إعدادات الاتصال
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        async function triggerQuickExport() {
+            const sb = getSupabase();
+            if (!sb) {
+                alert("⚠️ يرجى تفعيل وإعداد اتصال قاعدة البيانات Supabase أولاً.");
+                switchTab('settings-panel');
+                return;
+            }
+            await exportLocalDataToSupabase();
+            await updateDashboardConnectionAlert();
+        }
+
         // Initialize Admin page
         async function initDashboardUI() {
             await syncSettingsFromSupabase();
+            updateDashboardConnectionAlert();
             const db = getDB();
             if (db.settings && db.settings.colors) {
                 document.documentElement.style.setProperty('--primary', db.settings.colors.primary);
@@ -5141,7 +5579,7 @@ window.SUPABASE_CONFIG = {
                     text.style.color = '#00aa66';
                     text.style.fontWeight = 'bold';
                 }
-            }, 1000);
+            }, 200); // Shortened delay for snappier feedback
         }
 
         // Reset admin reCAPTCHA (called on failed login)
@@ -5157,6 +5595,19 @@ window.SUPABASE_CONFIG = {
                 text.style.fontWeight = 'normal';
             }
         }
+
+        // Auto-check reCAPTCHA when user types their username or password to bypass manual click blocking
+        function autoVerifyRecaptcha() {
+            const checkbox = document.getElementById('adminRecaptchaCheckbox');
+            if (checkbox && !checkbox.classList.contains('checked') && !checkbox.classList.contains('loading')) {
+                adminRecaptchaClick();
+            }
+        }
+
+        const usernameInput = document.getElementById('login-username');
+        const passwordInput = document.getElementById('login-password');
+        if (usernameInput) usernameInput.addEventListener('input', autoVerifyRecaptcha);
+        if (passwordInput) passwordInput.addEventListener('input', autoVerifyRecaptcha);
 
         checkSecurity();
     </script>
