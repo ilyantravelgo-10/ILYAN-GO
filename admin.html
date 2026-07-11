@@ -12,6 +12,8 @@
     <link href='https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css' rel='stylesheet'>
     <!-- Supabase JS Client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Shared config (Supabase credentials) -->
+    <script src="config.js"></script>
     <style>
         :root {
             --primary: #0284c7;
@@ -1329,6 +1331,42 @@
                 </div>
 
                 <div class="form-row" style="grid-template-columns: 1fr; gap: 30px;">
+
+                    <!-- CONNECTION STATUS BANNER -->
+                    <div id="connectionStatusBadge">
+                        <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:linear-gradient(135deg,#fef2f2,#fecaca);border:1.5px solid #ef4444;border-radius:12px;">
+                            <div style="width:12px;height:12px;background:#ef4444;border-radius:50%;box-shadow:0 0 0 3px rgba(239,68,68,0.25);flex-shrink:0;"></div>
+                            <div>
+                                <div style="font-weight:800;color:#991b1b;font-size:0.9rem;">&#x274C; وضع محلي &mdash; Local Mode Only</div>
+                                <div style="font-size:0.78rem;color:#b91c1c;margin-top:2px;">التعديلات لن تظهر على الموقع المنشور. فعّل Supabase أدناه &mdash; Changes will NOT appear on the published site. Enable Supabase below.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- CONFIG.JS GUIDE CARD -->
+                    <div style="background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1.5px solid #3b82f6;border-radius:14px;padding:20px;">
+                        <div style="display:flex;align-items:flex-start;gap:14px;">
+                            <i class='bx bx-link-external' style="font-size:1.8rem;color:#2563eb;flex-shrink:0;margin-top:2px;"></i>
+                            <div style="flex:1;">
+                                <h4 style="font-weight:800;color:#1e40af;margin:0 0 8px;font-size:0.95rem;">&#x1F517; لربط لوحة التحكم بالموقع المنشور — How to connect Admin to Published Site</h4>
+                                <p style="font-size:0.82rem;color:#1d4ed8;margin:0 0 12px;line-height:1.6;">
+                                    1. أنشئ مشروع Supabase مجاني على <strong>supabase.com</strong><br>
+                                    2. انسخ رابط المشروع ومفتاح API وأدخلهما أدناه وفعّل المزامنة<br>
+                                    3. افتح ملف <strong>config.js</strong> في مجلد المشروع وضع نفس البيانات فيه واضبط <strong>active: true</strong><br>
+                                    4. ارفع جميع الملفات للاستضافة مرة واحدة فقط — بعدها ستظهر كل التعديلات تلقائياً
+                                </p>
+                                <div style="background:rgba(30,64,175,0.1);border-radius:8px;padding:12px 14px;font-family:monospace;font-size:0.78rem;color:#1e3a8a;border:1px solid #93c5fd;">
+                                    <strong>config.js</strong><br>
+                                    window.SUPABASE_CONFIG = {<br>
+                                    &nbsp;&nbsp;url: "https://XXXX.supabase.co",<br>
+                                    &nbsp;&nbsp;key: "eyJhbGci...",<br>
+                                    &nbsp;&nbsp;active: <strong>true</strong><br>
+                                    };
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Supabase Connection Panel -->
                     <div class="card" style="margin-bottom: 0;">
                         <div class="card-header">
@@ -1358,6 +1396,14 @@
                             <button type="button" class="btn btn-outline btn-sm mt-2" onclick="copySqlScript()"><i class='bx bx-copy'></i> Copier le Script SQL</button>
                         </div>
                         <button type="button" class="btn btn-primary" onclick="saveSupabaseSettings()">Enregistrer les paramètres Supabase</button>
+                        <div style="display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap;">
+                            <button type="button" class="btn btn-outline" style="flex: 1; min-width: 200px; padding: 10px;" onclick="downloadConfigJS()">
+                                <i class='bx bx-download' style="font-size: 1.1rem; vertical-align: middle; margin-right: 5px;"></i> تحميل ملف config.js (Télécharger)
+                            </button>
+                            <button type="button" class="btn btn-outline" style="flex: 1; min-width: 200px; padding: 10px;" onclick="copyConfigJS()">
+                                <i class='bx bx-copy' style="font-size: 1.1rem; vertical-align: middle; margin-right: 5px;"></i> نسخ كود الإعدادات (Copier le Code)
+                            </button>
+                        </div>
                     </div>
 
                     <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
@@ -2067,7 +2113,36 @@ create table if not exists public.audit_logs (
   "userEmail" text not null,
   action text not null,
   timestamp timestamp with time zone default timezone('utc'::text, now()) not null
-);`;
+);
+
+create table if not exists public.live_chats (
+  id text primary key,
+  "clientName" text not null,
+  messages jsonb not null default '[]'::jsonb,
+  "lastUpdated" text not null,
+  active boolean not null default true
+);
+
+create table if not exists public.promo_codes (
+  id text primary key,
+  code text not null unique,
+  discount double precision not null,
+  type text not null,
+  active boolean not null default true
+);
+
+-- Disable Row Level Security (RLS) on all tables for instant public read/write sync
+alter table public.categories disable row level security;
+alter table public.countries disable row level security;
+alter table public.offers disable row level security;
+alter table public.orders disable row level security;
+alter table public.customers disable row level security;
+alter table public.messages disable row level security;
+alter table public.settings disable row level security;
+alter table public.staff_profiles disable row level security;
+alter table public.audit_logs disable row level security;
+alter table public.live_chats disable row level security;
+alter table public.promo_codes disable row level security;`;
     </script>
 
     <!-- FRONTEND JAVASCRIPT SYSTEM ENGINE -->
@@ -2108,6 +2183,18 @@ create table if not exists public.audit_logs (
 
         function getSupabase() {
             if (supabaseClient) return supabaseClient;
+
+            // 1st priority: config.js (SUPABASE_CONFIG) — shared by site and admin
+            if (window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.active &&
+                window.SUPABASE_CONFIG.url && window.SUPABASE_CONFIG.key) {
+                supabaseClient = window.supabase.createClient(
+                    window.SUPABASE_CONFIG.url,
+                    window.SUPABASE_CONFIG.key
+                );
+                return supabaseClient;
+            }
+
+            // 2nd priority: settings saved from the admin panel in localStorage
             const db = getDB();
             if (db.settings && db.settings.supabase && db.settings.supabase.active) {
                 const url = db.settings.supabase.url;
@@ -2120,6 +2207,36 @@ create table if not exists public.audit_logs (
             return null;
         }
 
+        async function syncSettingsFromSupabase() {
+            const sb = getSupabase();
+            if (sb) {
+                try {
+                    const { data, error } = await sb.from('settings').select('*').eq('id', 'global_settings').single();
+                    if (!error && data && data.data) {
+                        const db = getDB();
+                        const localSupabase = db.settings ? db.settings.supabase : null;
+                        db.settings = { ...db.settings, ...data.data };
+                        if (localSupabase) {
+                            db.settings.supabase = localSupabase;
+                        }
+                        saveDB(db);
+                        
+                        // Update UI colors immediately
+                        if (db.settings.colors) {
+                            document.documentElement.style.setProperty('--primary', db.settings.colors.primary);
+                            document.documentElement.style.setProperty('--secondary', db.settings.colors.secondary);
+                        }
+                        const nameEl = document.getElementById('sidebar-site-name');
+                        if (nameEl && db.settings.siteName) {
+                            nameEl.innerText = db.settings.siteName;
+                        }
+                    }
+                } catch (e) {
+                    console.error("Failed to sync settings from Supabase:", e);
+                }
+            }
+        }
+
         // Map javascript table names to PostgreSQL tables
         function getMappedTableName(table) {
             const map = {
@@ -2130,7 +2247,8 @@ create table if not exists public.audit_logs (
                 'customers': 'customers',
                 'messages': 'messages',
                 'auditLogs': 'audit_logs',
-                'staff': 'staff_profiles'
+                'staff': 'staff_profiles',
+                'promoCodes': 'promo_codes'
             };
             return map[table] || table;
         }
@@ -2405,7 +2523,7 @@ create table if not exists public.audit_logs (
             });
         });
 
-        function switchTab(tabId) {
+        async function switchTab(tabId) {
             menuItems.forEach(item => {
                 item.classList.remove('active');
                 if (item.getAttribute('data-tab') === tabId) {
@@ -2429,10 +2547,19 @@ create table if not exists public.audit_logs (
             if (tabId === 'countries-panel') renderCountries();
             if (tabId === 'customers-panel') renderCustomers();
             if (tabId === 'inbox-panel') renderInbox();
-            if (tabId === 'content-panel') renderContentEditor();
-            if (tabId === 'hero-video-panel') renderHeroVideoPanel();
+            if (tabId === 'content-panel') {
+                await syncSettingsFromSupabase();
+                renderContentEditor();
+            }
+            if (tabId === 'hero-video-panel') {
+                await syncSettingsFromSupabase();
+                renderHeroVideoPanel();
+            }
             if (tabId === 'logs-panel') renderLogsPanel();
-            if (tabId === 'settings-panel') renderSettingsPanel();
+            if (tabId === 'settings-panel') {
+                await syncSettingsFromSupabase();
+                renderSettingsPanel();
+            }
             if (tabId === 'promo-panel') renderPromos();
             if (tabId === 'chat-panel') renderAdminChat();
         }
@@ -4306,6 +4433,10 @@ create table if not exists public.audit_logs (
                 document.getElementById('settings-panel').querySelectorAll('button:not(.storage-btn)').forEach(b => b.disabled = true);
             }
             updateStorageUsageDisplay();
+
+            // Update connection status live badge
+            const isConnected = !!(getSupabase());
+            updateConnectionStatusBadge(isConnected);
         }
 
         document.getElementById('globalContactForm').addEventListener('submit', async function(e) {
@@ -4369,28 +4500,120 @@ create table if not exists public.audit_logs (
             const active = document.getElementById('supabaseSyncToggle').checked;
 
             const db = getDB();
-            db.settings.supabase = {
-                url: url,
-                key: key,
-                active: active
-            };
-
+            db.settings.supabase = { url, key, active };
             saveDB(db);
-            
-            // Re-instantiate Client
+
+            // Instantly update the shared SUPABASE_CONFIG in memory
+            if (window.SUPABASE_CONFIG) {
+                window.SUPABASE_CONFIG.url = url;
+                window.SUPABASE_CONFIG.key = key;
+                window.SUPABASE_CONFIG.active = active;
+            }
+
+            // Reset client to force reconnection with new credentials
             supabaseClient = null;
+
             if (active && url && key) {
                 try {
                     const client = getSupabase();
                     if (client) {
-                        alert("Connexion Supabase configurée et activée !");
-                        await logAction("Paramètres de connexion Supabase mis à jour.");
+                        showToast('Supabase connecte ! Les modifications s\'affichent sur le site publie.', 'success');
+                        await logAction('Parametres Supabase mis a jour et actives.');
+                        updateConnectionStatusBadge(true);
                     }
                 } catch (err) {
-                    alert("Erreur de connexion Supabase: " + err.message);
+                    showToast('Erreur Supabase: ' + err.message, 'error');
                 }
             } else {
-                alert("Mode local réactivé.");
+                updateConnectionStatusBadge(false);
+                showToast('Mode local uniquement. Les modifications n\'affecteront pas le site publie.', 'error');
+            }
+        }
+
+        function downloadConfigJS() {
+            const url = document.getElementById('supabaseUrlInput').value.trim();
+            const key = document.getElementById('supabaseKeyInput').value.trim();
+            const active = document.getElementById('supabaseSyncToggle').checked;
+
+            if (!url || !key) {
+                alert("يرجى إدخال رابط المشروع ومفتاح API أولاً / Veuillez saisir l'URL et la clé API d'abord.");
+                return;
+            }
+
+            const content = `// ILYAN GO - Configuration de la base de données Supabase
+// لربط لوحة التحكم بالموقع المنشور بشكل نهائي، ضع بيانات مشروع Supabase الخاص بك هنا.
+// Pour connecter définitivement la console d'administration au site public, renseignez vos identifiants Supabase ici.
+
+window.SUPABASE_CONFIG = {
+    // 1. Supabase Project URL
+    url: "${url}", 
+    
+    // 2. Supabase Anon API Key
+    key: "${key}", 
+    
+    // 3. Activer la synchronisation (true / false)
+    active: ${active} 
+};
+`;
+
+            const blob = new Blob([content], { type: 'application/javascript;charset=utf-8;' });
+            const link = document.createElement("a");
+            if (link.download !== undefined) {
+                const urlObj = URL.createObjectURL(blob);
+                link.setAttribute("href", urlObj);
+                link.setAttribute("download", "config.js");
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+            showToast('تم تحميل ملف config.js! يرجى وضعه في مجلد المشروع الرئيسي.', 'success');
+        }
+
+        function copyConfigJS() {
+            const url = document.getElementById('supabaseUrlInput').value.trim();
+            const key = document.getElementById('supabaseKeyInput').value.trim();
+            const active = document.getElementById('supabaseSyncToggle').checked;
+
+            if (!url || !key) {
+                alert("يرجى إدخال رابط المشروع ومفتاح API أولاً / Veuillez saisir l'URL et la clé API d'abord.");
+                return;
+            }
+
+            const content = `window.SUPABASE_CONFIG = {
+    url: "${url}", 
+    key: "${key}", 
+    active: ${active} 
+};`;
+
+            navigator.clipboard.writeText(content).then(() => {
+                showToast('تم نسخ كود config.js إلى الحافظة!', 'success');
+            }).catch(err => {
+                alert('خطأ في النسخ: ' + err);
+            });
+        }
+
+        function updateConnectionStatusBadge(isConnected) {
+            const badge = document.getElementById('connectionStatusBadge');
+            if (!badge) return;
+            if (isConnected) {
+                badge.innerHTML = `
+                    <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:linear-gradient(135deg,#d1fae5,#a7f3d0);border:1.5px solid #10b981;border-radius:12px;">
+                        <div style="width:12px;height:12px;background:#10b981;border-radius:50%;box-shadow:0 0 0 3px rgba(16,185,129,0.25);flex-shrink:0;"></div>
+                        <div>
+                            <div style="font-weight:800;color:#065f46;font-size:0.9rem;">&#x2705; متصل بقاعدة البيانات &mdash; Connected to Supabase</div>
+                            <div style="font-size:0.78rem;color:#047857;margin-top:2px;">أي تعديل سيظهر فورًا على الموقع المنشور &mdash; All changes will appear live on the published site</div>
+                        </div>
+                    </div>`;
+            } else {
+                badge.innerHTML = `
+                    <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:linear-gradient(135deg,#fef2f2,#fecaca);border:1.5px solid #ef4444;border-radius:12px;">
+                        <div style="width:12px;height:12px;background:#ef4444;border-radius:50%;box-shadow:0 0 0 3px rgba(239,68,68,0.25);flex-shrink:0;"></div>
+                        <div>
+                            <div style="font-weight:800;color:#991b1b;font-size:0.9rem;">&#x274C; وضع محلي &mdash; Local Mode Only</div>
+                            <div style="font-size:0.78rem;color:#b91c1c;margin-top:2px;">التعديلات لن تظهر على الموقع المنشور. فعّل Supabase أدناه &mdash; Changes will NOT appear on the published site.</div>
+                        </div>
+                    </div>`;
             }
         }
 
@@ -4575,6 +4798,12 @@ create table if not exists public.audit_logs (
         // ================================================================
         async function renderPromos() {
             const promos = await dbFetch('promoCodes');
+            
+            // Sync to local storage for form references
+            const db = getDB();
+            db.promoCodes = promos;
+            saveDB(db);
+
             const tbody = document.getElementById('promosTableBody');
             if (!tbody) return;
             tbody.innerHTML = '';
@@ -4637,49 +4866,46 @@ create table if not exists public.audit_logs (
                 return;
             }
 
-            const db = getDB();
-            if (!db.promoCodes) db.promoCodes = [];
+            const promoData = {
+                id: code,
+                code: code,
+                discount: discount,
+                type: type,
+                active: true
+            };
 
             if (originalCode) {
-                // Edit existing
-                const idx = db.promoCodes.findIndex(p => p.code === originalCode);
-                if (idx !== -1) {
-                    db.promoCodes[idx] = { ...db.promoCodes[idx], code, discount, type };
-                }
+                promoData.id = originalCode;
+                promoData.code = code;
+                await dbUpdate('promoCodes', originalCode, promoData);
             } else {
-                // Check unique
-                if (db.promoCodes.some(p => p.code === code)) {
+                const promos = await dbFetch('promoCodes');
+                if (promos.some(p => p.code === code)) {
                     alert(`Le code "${code}" existe déjà.`);
                     return;
                 }
-                db.promoCodes.push({ code, discount, type, active: true });
+                await dbInsert('promoCodes', promoData);
             }
 
-            saveDB(db);
             await logAction(`Sauvegarde du code promo ${code} (${discount} ${type}).`);
             closeModal('promoModal');
             renderPromos();
         });
 
         async function togglePromoActive(code) {
-            const db = getDB();
-            if (!db.promoCodes) return;
-            const idx = db.promoCodes.findIndex(p => p.code === code);
-            if (idx !== -1) {
-                db.promoCodes[idx].active = !db.promoCodes[idx].active;
-                saveDB(db);
-                await logAction(`Code promo ${code} ${db.promoCodes[idx].active ? 'activé' : 'désactivé'}.`);
+            const promos = await dbFetch('promoCodes');
+            const promo = promos.find(p => p.code === code);
+            if (promo) {
+                const nextActive = !promo.active;
+                await dbUpdate('promoCodes', code, { active: nextActive });
+                await logAction(`Code promo ${code} ${nextActive ? 'activé' : 'désactivé'}.`);
                 renderPromos();
             }
         }
 
         async function deletePromo(code) {
             if (!confirm(`Voulez-vous supprimer définitivement le code promo "${code}" ?`)) return;
-            const db = getDB();
-            if (db.promoCodes) {
-                db.promoCodes = db.promoCodes.filter(p => p.code !== code);
-                saveDB(db);
-            }
+            await dbDelete('promoCodes', code);
             await logAction(`Suppression du code promo ${code}.`);
             renderPromos();
         }
@@ -4868,14 +5094,16 @@ create table if not exists public.audit_logs (
         });
 
         // Initialize Admin page
-        function initDashboardUI() {
+        async function initDashboardUI() {
+            await syncSettingsFromSupabase();
             const db = getDB();
             if (db.settings && db.settings.colors) {
                 document.documentElement.style.setProperty('--primary', db.settings.colors.primary);
                 document.documentElement.style.setProperty('--secondary', db.settings.colors.secondary);
             }
-            if (db.settings && db.settings.siteName) {
-                document.getElementById('sidebar-site-name').innerText = db.settings.siteName;
+            const nameEl = document.getElementById('sidebar-site-name');
+            if (nameEl && db.settings && db.settings.siteName) {
+                nameEl.innerText = db.settings.siteName;
             }
 
             const days = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];

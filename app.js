@@ -884,8 +884,8 @@ const DEFAULT_BLOG = [
 ];
 
 const DEFAULT_PROMO_CODES = [
-    { code: "WELCOME10", discount: 10, type: "percent", active: true },
-    { code: "ILYANGO2000", discount: 2000, type: "fixed", active: true }
+    { id: "WELCOME10", code: "WELCOME10", discount: 10, type: "percent", active: true },
+    { id: "ILYANGO2000", code: "ILYANGO2000", discount: 2000, type: "fixed", active: true }
 ];
 
 const DEFAULT_STAFF = [
@@ -928,6 +928,12 @@ function getDB() {
     if (!db.blog) { db.blog = DEFAULT_BLOG; updated = true; }
     if (!db.promoCodes) { db.promoCodes = DEFAULT_PROMO_CODES; updated = true; }
     if (!db.liveChats) { db.liveChats = []; updated = true; }
+    // Ensure all promo codes have an ID
+    if (db.promoCodes) {
+        db.promoCodes.forEach(p => {
+            if (!p.id) { p.id = p.code; updated = true; }
+        });
+    }
     // Preserve dynamic offers if any, otherwise seed with defaults
     if (!db.offers) {
         db.offers = DEFAULT_OFFERS;
@@ -989,6 +995,18 @@ function saveDB(db) {
 let supabaseClient = null;
 function getSupabase() {
     if (supabaseClient) return supabaseClient;
+
+    // 1st priority: config.js (SUPABASE_CONFIG object) — shared by site and admin
+    if (window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.active &&
+        window.SUPABASE_CONFIG.url && window.SUPABASE_CONFIG.key) {
+        supabaseClient = window.supabase.createClient(
+            window.SUPABASE_CONFIG.url,
+            window.SUPABASE_CONFIG.key
+        );
+        return supabaseClient;
+    }
+
+    // 2nd priority: settings saved from the admin panel in localStorage
     const db = getDB();
     if (db.settings && db.settings.supabase && db.settings.supabase.active) {
         const url = db.settings.supabase.url;
@@ -1006,12 +1024,13 @@ async function loadInitialData() {
     const sb = getSupabase();
     if (sb) {
         try {
-            // Fetch categories, countries, offers and settings in parallel
-            const [catRes, countRes, offRes, settingsRes] = await Promise.all([
+            // Fetch categories, countries, offers, settings and promo_codes in parallel
+            const [catRes, countRes, offRes, settingsRes, promoRes] = await Promise.all([
                 sb.from('categories').select('*'),
                 sb.from('countries').select('*'),
                 sb.from('offers').select('*'),
-                sb.from('settings').select('*').eq('id', 'global_settings').single()
+                sb.from('settings').select('*').eq('id', 'global_settings').single(),
+                sb.from('promo_codes').select('*')
             ]);
 
             if (catRes.error) throw catRes.error;
@@ -1021,6 +1040,13 @@ async function loadInitialData() {
             activeCategories = catRes.data || [];
             activeCountries = (countRes.data || []).sort((a,b) => (a.order || 0) - (b.order || 0));
             activeOffers = offRes.data || [];
+
+            // Sync promo codes to localStorage for local reference
+            if (!promoRes.error && promoRes.data) {
+                const db = getDB();
+                db.promoCodes = promoRes.data;
+                saveDB(db);
+            }
 
             // If Supabase settings fetched successfully, overwrite local settings
             if (settingsRes.data && settingsRes.data.data) {
