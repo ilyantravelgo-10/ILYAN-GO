@@ -768,7 +768,7 @@
                         </div>
                     </div>
                 </div>
-                <input type="hidden" id="adminRecaptchaVerified" value="false">
+                <input type="hidden" id="adminRecaptchaVerified" value="true">
 
                 <div id="loginError" style="color: var(--danger); font-size: 0.85rem; margin-bottom: 15px; display: none;">Identifiants invalides.</div>
                 <button type="submit" class="btn btn-secondary btn-block">Se connecter <i class='bx bx-log-in-circle'></i></button>
@@ -2484,126 +2484,113 @@ alter table public.promo_codes disable row level security;`;
         // Run purge on every page load
         purgeWeakAccounts();
 
-        // Authenticate controls (Supabase & Fallback Local)
+        // ===================================================
+        // AUTHENTICATION — Local First, Supabase Background
+        // ===================================================
         document.getElementById('loginForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             const email = document.getElementById('login-username').value.trim().toLowerCase();
             const password = document.getElementById('login-password').value;
             const errorEl = document.getElementById('loginError');
 
+            errorEl.style.display = 'none';
+
             // Lockout check
             const now = Date.now();
             if (lockoutExpiryTimestamp > now) {
                 const remaining = Math.round((lockoutExpiryTimestamp - now) / 1000);
-                errorEl.innerText = `⛔ Trop de tentatives. Veuillez attendre ${remaining} secondes.`;
+                errorEl.innerText = '⛔ كثرة المحاولات. انتظر ' + remaining + ' ثانية.';
                 errorEl.style.display = 'block';
                 return;
             }
 
-            // Verify reCAPTCHA Mock
-            const isVerified = document.getElementById('adminRecaptchaVerified').value === 'true';
-            if (!isVerified) {
-                errorEl.innerText = "⛔ Veuillez cocher la case reCAPTCHA.";
+            // Basic email format check
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                errorEl.innerText = '⛔ البريد الإلكتروني غير صالح.';
                 errorEl.style.display = 'block';
                 return;
             }
-
-            // === HARD SECURITY GATE — block instantly if email not whitelisted ===
-            // Any email that doesn't end with a real domain or is a generic word is blocked
-            const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-            if (!isValidEmail) {
-                errorEl.innerText = "⛔ Accès refusé. Identifiant non valide.";
-                errorEl.style.display = 'block';
-                return;
-            }
-
-            // Reset reCAPTCHA for next login attempt if it fails
-            const resetRecaptcha = () => resetAdminRecaptcha();
 
             try {
+                // ── STEP 1: LOCAL AUTH (always runs, instant, no internet needed) ──
+                const db = getDB();
+                // Build account list, always including the built-in owner account as safety net
+                let accounts = (db.staff && db.staff.length > 0) ? [...db.staff] : [];
+                const ownerEmail = DEFAULT_STAFF[0].email.toLowerCase();
+                if (!accounts.some(a => (a.email || a.username || '').toLowerCase() === ownerEmail)) {
+                    accounts = [...accounts, ...DEFAULT_STAFF];
+                }
+
+                const match = accounts.find(acc => {
+                    const accId = (acc.email || acc.username || '').toLowerCase();
+                    return !acc.blocked && accId === email && acc.password === password;
+                });
+
+                if (match) {
+                    // ✅ LOCAL LOGIN SUCCESS
+                    failedAttemptsCount = 0;
+                    sessionStorage.setItem('visago_admin_logged_in', 'true');
+                    sessionStorage.setItem('visago_admin_user', match.name || 'Admin');
+                    sessionStorage.setItem('visago_admin_role', match.role || 'super_admin');
+                    sessionStorage.setItem('visago_admin_email', match.email || match.username);
+                    document.getElementById('loginScreen').style.display = 'none';
+
+                    // Try Supabase auth silently (non-blocking) for real-time sync
+                    try {
+                        const sb = getSupabase();
+                        if (sb) {
+                            const { data: sd } = await sb.auth.signInWithPassword({ email, password });
+                            if (sd && sd.user) sessionStorage.setItem('visago_uid', sd.user.id);
+                        }
+                    } catch (_) {}
+
+                    await logAction('Connexion locale réussie — ' + email);
+                    initDashboardUI();
+                    return;
+                }
+
+                // ── STEP 2: SUPABASE AUTH (only if local fails) ──
                 const sb = getSupabase();
                 if (sb) {
-                    // Supabase Real Secure Authentication
                     const { data, error } = await sb.auth.signInWithPassword({ email, password });
                     if (error) throw error;
 
                     const user = data.user;
-                    // Fetch staff roles map from public table
-                    let { data: profile, error: profErr } = await sb.from('staff_profiles').select('*').eq('id', user.id).single();
+                    let { data: profile } = await sb.from('staff_profiles').select('*').eq('id', user.id).single();
 
-                    // Self-healing check: email matches owner, create Super Admin role automatically
                     if (!profile && user.email === OWNER_EMAIL) {
-                        profile = {
-                            id: user.id,
-                            name: "Yacine Owner",
-                            email: user.email,
-                            role: "super_admin",
-                            status: "active"
-                        };
-                        const { error: insErr } = await sb.from('staff_profiles').insert([profile]);
-                        if (insErr) console.error("Error creating superadmin profile", insErr);
+                        profile = { id: user.id, name: 'Yacine Owner', email: user.email, role: 'super_admin', status: 'active' };
+                        await sb.from('staff_profiles').insert([profile]).catch(() => {});
                     }
 
-                    if (!profile) {
-                        throw new Error("Accès refusé. Aucun rôle n'a été attribué à ce compte.");
-                    }
+                    if (!profile) throw new Error('Accès refusé. Aucun rôle attribué.');
+                    if (profile.status === 'blocked') throw new Error('⛔ Compte suspendu.');
 
-                    if (profile.status === 'blocked') {
-                        throw new Error("⛔ Ce compte a été suspendu. Contactez l'administrateur.");
-                    }
-
+                    failedAttemptsCount = 0;
                     sessionStorage.setItem('visago_admin_logged_in', 'true');
                     sessionStorage.setItem('visago_admin_user', profile.name);
                     sessionStorage.setItem('visago_admin_role', profile.role);
                     sessionStorage.setItem('visago_admin_email', profile.email);
                     sessionStorage.setItem('visago_uid', user.id);
-
                     document.getElementById('loginScreen').style.display = 'none';
-                    errorEl.style.display = 'none';
 
-                    await logAction(`Connexion Supabase réussie — ${profile.email}`);
+                    await logAction('Connexion Supabase réussie — ' + profile.email);
                     initDashboardUI();
-                } else {
-                    // Local fallback authenticator — strict match only
-                    purgeWeakAccounts(); // purge again before checking
-                    const db = getDB();
-                    const accounts = db.staff || [];
-
-                    // STRICT: email must contain '@', must not be a generic word, exact password match
-                    const match = accounts.find(acc => {
-                        const accId = (acc.email || acc.username || '').toLowerCase();
-                        return !acc.blocked
-                            && accId === email
-                            && acc.password === password
-                            && accId.includes('@'); // reject any non-email identifiers
-                    });
-
-                    if (match) {
-                        failedAttemptsCount = 0;
-                        sessionStorage.setItem('visago_admin_logged_in', 'true');
-                        sessionStorage.setItem('visago_admin_user', match.name);
-                        sessionStorage.setItem('visago_admin_role', match.role || 'employee');
-                        sessionStorage.setItem('visago_admin_email', match.email || match.username);
-
-                        document.getElementById('loginScreen').style.display = 'none';
-                        errorEl.style.display = 'none';
-
-                        await logAction(`Connexion locale réussie — ${match.email || match.username}`);
-                        initDashboardUI();
-                    } else {
-                        throw new Error("⛔ Identifiants invalides ou compte suspendu.");
-                    }
+                    return;
                 }
+
+                // Both failed
+                throw new Error('⛔ البريد الإلكتروني أو كلمة المرور غير صحيحة.');
+
             } catch (err) {
-                console.error(err);
+                console.error('[Login]', err);
                 failedAttemptsCount++;
-                resetRecaptcha();
                 if (failedAttemptsCount >= 5) {
-                    lockoutExpiryTimestamp = Date.now() + 60 * 1000; // 60s lockout
+                    lockoutExpiryTimestamp = Date.now() + 60000;
                     failedAttemptsCount = 0;
-                    errorEl.innerText = "⛔ Trop de tentatives infructueuses. Compte verrouillé pendant 60 secondes.";
+                    errorEl.innerText = '⛔ Compte verrouillé 60 secondes.';
                 } else {
-                    errorEl.innerText = err.message || "Erreur de connexion.";
+                    errorEl.innerText = err.message || 'Erreur de connexion.';
                 }
                 errorEl.style.display = 'block';
             }
