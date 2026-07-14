@@ -2232,6 +2232,26 @@ alter table public.promo_codes disable row level security;`;
                 localStorage.setItem('visago_db', JSON.stringify(db));
             }
 
+            // Auto-sync Supabase Config from config.js (SUPABASE_CONFIG) if active on server/local folder
+            if (window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.active && window.SUPABASE_CONFIG.url && window.SUPABASE_CONFIG.key) {
+                if (!db.settings) {
+                    db.settings = DEFAULT_SETTINGS;
+                }
+                if (!db.settings.supabase) {
+                    db.settings.supabase = { url: '', key: '', active: false };
+                }
+                const localSb = db.settings.supabase;
+                if (localSb.url !== window.SUPABASE_CONFIG.url || 
+                    localSb.key !== window.SUPABASE_CONFIG.key || 
+                    localSb.active !== window.SUPABASE_CONFIG.active) {
+                    
+                    localSb.url = window.SUPABASE_CONFIG.url;
+                    localSb.key = window.SUPABASE_CONFIG.key;
+                    localSb.active = window.SUPABASE_CONFIG.active;
+                    localStorage.setItem('visago_db', JSON.stringify(db));
+                }
+            }
+
             // Migration: If siteName is still Visago, update it to ILYAN GO
             if (db.settings && db.settings.siteName === "Visago") {
                 db.settings.siteName = "ILYAN GO";
@@ -2258,12 +2278,27 @@ alter table public.promo_codes disable row level security;`;
 
         // Supabase Client Initializer
         let supabaseClient = null;
+        let supabaseOffline = false; // true when network unreachable
         
         // Security Lockout attempts state
         let failedAttemptsCount = 0;
         let lockoutExpiryTimestamp = 0;
 
+        function isNetworkError(err) {
+            if (!err) return false;
+            const msg = (err.message || err.toString()).toLowerCase();
+            return msg.includes('failed to fetch') || msg.includes('networkerror') || msg.includes('network request failed') || msg.includes('load failed');
+        }
+
+        function setSupabaseOffline() {
+            supabaseOffline = true;
+            supabaseClient = null;
+            updateConnectionStatusBadge('offline');
+            console.warn('[ILYAN GO] Supabase inaccessible — mode local activé / Supabase offline, running in local mode.');
+        }
+
         function getSupabase() {
+            if (supabaseOffline) return null;
             if (supabaseClient) return supabaseClient;
 
             // 1st priority: settings saved from the admin panel in localStorage (configured via Admin UI)
@@ -2321,7 +2356,11 @@ alter table public.promo_codes disable row level security;`;
                         }
                     }
                 } catch (e) {
-                    console.error("Failed to sync settings from Supabase:", e);
+                    if (isNetworkError(e)) {
+                        setSupabaseOffline();
+                    } else {
+                        console.error("Failed to sync settings from Supabase:", e);
+                    }
                 }
             }
         }
@@ -2346,27 +2385,33 @@ alter table public.promo_codes disable row level security;`;
         async function dbFetch(table) {
             const sb = getSupabase();
             if (sb) {
-                const mapped = getMappedTableName(table);
-                const { data, error } = await sb.from(mapped).select('*');
-                if (error) {
-                    // Silently fallback to local if tables don't exist yet
-                    if (error.code === 'PGRST205' || (error.message && error.message.includes('schema cache'))) {
+                try {
+                    const mapped = getMappedTableName(table);
+                    const { data, error } = await sb.from(mapped).select('*');
+                    if (error) {
+                        // Silently fallback to local if tables don't exist yet
+                        if (error.code === 'PGRST205' || (error.message && error.message.includes('schema cache'))) {
+                            return getLocalTable(table);
+                        }
+                        if (isNetworkError(error)) { setSupabaseOffline(); return getLocalTable(table); }
+                        console.error("Error fetching table " + table, error);
                         return getLocalTable(table);
                     }
-                    console.error("Error fetching table " + table, error);
+                    // If Supabase returned data, also update local cache
+                    if (data) {
+                        const db = getDB();
+                        if (table === 'auditLogs') {
+                            db.auditLogs = data;
+                        } else if (db[table] !== undefined) {
+                            db[table] = data;
+                        }
+                        saveDB(db);
+                    }
+                    return data;
+                } catch (e) {
+                    if (isNetworkError(e)) { setSupabaseOffline(); }
                     return getLocalTable(table);
                 }
-                // If Supabase returned data, also update local cache
-                if (data) {
-                    const db = getDB();
-                    if (table === 'auditLogs') {
-                        db.auditLogs = data;
-                    } else if (db[table] !== undefined) {
-                        db[table] = data;
-                    }
-                    saveDB(db);
-                }
-                return data;
             }
             return getLocalTable(table);
         }
@@ -2390,12 +2435,15 @@ alter table public.promo_codes disable row level security;`;
             // Then sync to Supabase if connected
             const sb = getSupabase();
             if (sb) {
-                const mapped = getMappedTableName(table);
-                const { error } = await sb.from(mapped).insert([record]);
-                if (error) {
-                    console.error('Supabase insert error (' + table + '):', error);
-                    showToast('⚠️ Sauvegardé localement. Erreur Supabase: ' + (error.message || error.code), 'warning');
-                }
+                try {
+                    const mapped = getMappedTableName(table);
+                    const { error } = await sb.from(mapped).insert([record]);
+                    if (error) {
+                        if (isNetworkError(error)) { setSupabaseOffline(); return; }
+                        console.error('Supabase insert error (' + table + '):', error);
+                        showToast('⚠️ Sauvegardé localement. Erreur Supabase: ' + (error.message || error.code), 'warning');
+                    }
+                } catch(e) { if (isNetworkError(e)) setSupabaseOffline(); }
             }
         }
 
@@ -2411,12 +2459,15 @@ alter table public.promo_codes disable row level security;`;
             // Then sync to Supabase if connected
             const sb = getSupabase();
             if (sb) {
-                const mapped = getMappedTableName(table);
-                const { error } = await sb.from(mapped).update(record).eq('id', id);
-                if (error) {
-                    console.error('Supabase update error (' + table + '):', error);
-                    showToast('⚠️ Sauvegardé localement. Erreur Supabase: ' + (error.message || error.code), 'warning');
-                }
+                try {
+                    const mapped = getMappedTableName(table);
+                    const { error } = await sb.from(mapped).update(record).eq('id', id);
+                    if (error) {
+                        if (isNetworkError(error)) { setSupabaseOffline(); return; }
+                        console.error('Supabase update error (' + table + '):', error);
+                        showToast('⚠️ Sauvegardé localement. Erreur Supabase: ' + (error.message || error.code), 'warning');
+                    }
+                } catch(e) { if (isNetworkError(e)) setSupabaseOffline(); }
             }
         }
 
@@ -2429,12 +2480,15 @@ alter table public.promo_codes disable row level security;`;
             // Then sync to Supabase if connected
             const sb = getSupabase();
             if (sb) {
-                const mapped = getMappedTableName(table);
-                const { error } = await sb.from(mapped).delete().eq('id', id);
-                if (error) {
-                    console.error('Supabase delete error (' + table + '):', error);
-                    showToast('⚠️ Supprimé localement. Erreur Supabase: ' + (error.message || error.code), 'warning');
-                }
+                try {
+                    const mapped = getMappedTableName(table);
+                    const { error } = await sb.from(mapped).delete().eq('id', id);
+                    if (error) {
+                        if (isNetworkError(error)) { setSupabaseOffline(); return; }
+                        console.error('Supabase delete error (' + table + '):', error);
+                        showToast('⚠️ Supprimé localement. Erreur Supabase: ' + (error.message || error.code), 'warning');
+                    }
+                } catch(e) { if (isNetworkError(e)) setSupabaseOffline(); }
             }
         }
 
@@ -4141,11 +4195,17 @@ alter table public.promo_codes disable row level security;`;
             }
         }
 
-        function toggleSectionState(sectionKey) {
+        async function toggleSectionState(sectionKey) {
             const db = getDB();
             db.settings.sections[sectionKey] = document.getElementById(`section-check-${sectionKey}`).checked;
             saveDB(db);
-            logAction(`Modification de l'état d'affichage de la section "${sectionKey}"`);
+            
+            const sb = getSupabase();
+            if (sb) {
+                await sb.from('settings').upsert([{ id: 'global_settings', data: db.settings }]);
+            }
+            
+            await logAction(`Modification de l'état d'affichage de la section "${sectionKey}"`);
         }
 
         document.getElementById('heroContentForm').addEventListener('submit', async function(e) {
@@ -4405,6 +4465,19 @@ alter table public.promo_codes disable row level security;`;
             const wasBlocked = db.staff[index].blocked || false;
             db.staff[index].blocked = !wasBlocked;
             saveDB(db);
+
+            const sb = getSupabase();
+            if (sb) {
+                try {
+                    const staffMember = db.staff[index];
+                    const { data: profile } = await sb.from('staff_profiles').select('id').eq('email', staffMember.email || staffMember.username).single();
+                    if (profile && profile.id) {
+                        await sb.from('staff_profiles').update({ status: db.staff[index].blocked ? 'blocked' : 'active' }).eq('id', profile.id);
+                    }
+                } catch(e) {
+                    console.error("Supabase sync failed on staff block toggle:", e);
+                }
+            }
 
             const actionStr = wasBlocked ? 'Déblocage' : 'Suspension';
             await logAction(`${actionStr} du compte de ${db.staff[index].name} (${username}) par le Super Admin.`);
@@ -4719,6 +4792,18 @@ window.SUPABASE_CONFIG = {
             const badge = document.getElementById('connectionStatusBadge');
             if (!badge) return;
 
+            if (status === 'offline') {
+                badge.innerHTML = `
+                    <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:linear-gradient(135deg,#fffbeb,#fef3c7);border:1.5px solid #f59e0b;border-radius:12px;">
+                        <div style="width:12px;height:12px;background:#f59e0b;border-radius:50%;box-shadow:0 0 0 3px rgba(245,158,11,0.25);flex-shrink:0;"></div>
+                        <div>
+                            <div style="font-weight:800;color:#78350f;font-size:0.9rem;">🌐 وضع محلي — Supabase غير متاح حالياً</div>
+                            <div style="font-size:0.78rem;color:#b45309;margin-top:2px;">التطبيق يعمل بشكل طبيعي. البيانات محفوظة في المتصفح فقط. يمكنك تحديث بيانات Supabase من إعدادات الاتصال.</div>
+                        </div>
+                    </div>`;
+                return;
+            }
+
             if (status === 'connected') {
                 badge.innerHTML = `
                     <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:linear-gradient(135deg,#d1fae5,#a7f3d0);border:1.5px solid #10b981;border-radius:12px;">
@@ -4765,6 +4850,7 @@ window.SUPABASE_CONFIG = {
             const badge = document.getElementById('connectionStatusBadge');
             if (!badge) return;
 
+            supabaseOffline = false; // Reset offline status to allow retrying connection
             const sb = getSupabase();
             if (!sb) {
                 updateConnectionStatusBadge('local');
@@ -4785,14 +4871,21 @@ window.SUPABASE_CONFIG = {
                 if (error) {
                     if (error.code === 'PGRST205' || (error.message && error.message.includes('public.settings'))) {
                         updateConnectionStatusBadge('missing_tables', error.message);
+                    } else if (isNetworkError(error)) {
+                        setSupabaseOffline();
                     } else {
                         updateConnectionStatusBadge('error', error.message || JSON.stringify(error));
                     }
                 } else {
+                    supabaseOffline = false;
                     updateConnectionStatusBadge('connected');
                 }
             } catch (err) {
-                updateConnectionStatusBadge('error', err.message || err);
+                if (isNetworkError(err)) {
+                    setSupabaseOffline();
+                } else {
+                    updateConnectionStatusBadge('error', err.message || err);
+                }
             }
         }
 
@@ -5235,7 +5328,13 @@ window.SUPABASE_CONFIG = {
                     updated = true;
                 }
             });
-            if (updated) saveDB(db);
+            if (updated) {
+                saveDB(db);
+                const sb = getSupabase();
+                if (sb) {
+                    sb.from('live_chats').upsert([thread]).catch(e => console.error("Supabase sync failed on marking chat read:", e));
+                }
+            }
 
             // Update header
             const nameEl = document.getElementById('adminChatClientName');
@@ -5338,6 +5437,15 @@ window.SUPABASE_CONFIG = {
             thread.messages.push(msgObj);
             thread.lastUpdated = new Date().toISOString();
             saveDB(db);
+
+            const sb = getSupabase();
+            if (sb) {
+                try {
+                    await sb.from('live_chats').upsert([thread]);
+                } catch(e) {
+                    console.error("Supabase sync failed on send:", e);
+                }
+            }
 
             input.value = '';
             loadAdminChatThread(threadId, true);

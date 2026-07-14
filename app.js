@@ -924,6 +924,28 @@ function getDB() {
     const db = JSON.parse(dbStr);
     
     let updated = false;
+
+    // Auto-sync Supabase Config from config.js (SUPABASE_CONFIG) if active on server/local folder
+    if (window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.active && window.SUPABASE_CONFIG.url && window.SUPABASE_CONFIG.key) {
+        if (!db.settings) {
+            db.settings = { ...DEFAULT_SETTINGS };
+            updated = true;
+        }
+        if (!db.settings.supabase) {
+            db.settings.supabase = { url: '', key: '', active: false };
+            updated = true;
+        }
+        const localSb = db.settings.supabase;
+        if (localSb.url !== window.SUPABASE_CONFIG.url || 
+            localSb.key !== window.SUPABASE_CONFIG.key || 
+            localSb.active !== window.SUPABASE_CONFIG.active) {
+            
+            localSb.url = window.SUPABASE_CONFIG.url;
+            localSb.key = window.SUPABASE_CONFIG.key;
+            localSb.active = window.SUPABASE_CONFIG.active;
+            updated = true;
+        }
+    }
     if (!db.faqs) { db.faqs = DEFAULT_FAQS; updated = true; }
     if (!db.blog) { db.blog = DEFAULT_BLOG; updated = true; }
     if (!db.promoCodes) { db.promoCodes = DEFAULT_PROMO_CODES; updated = true; }
